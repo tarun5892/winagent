@@ -16,6 +16,8 @@ class Config:
     max_actions_per_cycle: int = 25
     pyautogui_pause_s: float = 0.15
     confirmation_default: bool = True
+    project_root: str = os.environ.get("WINAGENT_PROJECT_ROOT", os.getcwd())
+    streaming: bool = os.environ.get("WINAGENT_STREAMING", "1") not in ("", "0", "false", "False")
 
 
 CONFIG = Config()

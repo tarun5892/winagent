@@ -74,11 +74,43 @@ class MemoryManager:
         if t == "powershell":
             cmd = str(action.get("command", ""))
             return {"type": "powershell", "command": cmd[:80]}
+        if t == "shell":
+            cmd = str(action.get("command", ""))
+            return {"type": "shell", "command": cmd[:120]}
         if t == "excel":
             return {
                 "type": "excel",
                 "operation": action.get("operation"),
                 "cell": action.get("cell"),
                 "sheet": action.get("sheet"),
+            }
+        if t in ("file_read", "file_delete", "list_dir"):
+            return {"type": t, "path": action.get("path")}
+        if t == "file_write":
+            content = str(action.get("content", ""))
+            return {
+                "type": "file_write",
+                "path": action.get("path"),
+                "size": len(content),
+            }
+        if t == "file_edit":
+            return {"type": "file_edit", "path": action.get("path")}
+        if t == "apply_patch":
+            edits = action.get("edits") or []
+            return {
+                "type": "apply_patch",
+                "path": action.get("path"),
+                "edits": len(edits),
+            }
+        if t == "grep":
+            return {
+                "type": "grep",
+                "pattern": str(action.get("pattern", ""))[:60],
+                "path": action.get("path"),
+            }
+        if t == "find_files":
+            return {
+                "type": "find_files",
+                "pattern": str(action.get("pattern", ""))[:60],
             }
         return action

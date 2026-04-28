@@ -84,8 +84,15 @@ class Orchestrator(threading.Thread):
         log.info("command: %s", job.command)
         self.memory.add_command(job.command)
 
-        img, size = self.capture()
-        log.info("screenshot %dx%d, %d KB", size[0], size[1], len(img) // 1024)
+        try:
+            img, size = self.capture()
+            log.info("screenshot %dx%d, %d KB", size[0], size[1], len(img) // 1024)
+        except Exception as e:  # noqa: BLE001
+            # Coding tasks may run on machines without a display server.
+            # We still proceed — the LLM gets a 0x0 hint and (presumably)
+            # picks coding-agent actions instead of clicks.
+            log.warning("screenshot unavailable (%s); proceeding without one", e)
+            img, size = b"", (0, 0)
 
         try:
             raw = self.client.plan(job.command, img, size, self.memory.snapshot())

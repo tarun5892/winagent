@@ -12,6 +12,8 @@ Output ONE JSON object. No prose, no markdown fences. Schema:
 }
 
 Action variants (discriminated by "type"):
+
+[Desktop automation]
   {"type":"click", "x":int, "y":int, "button":"left|right|middle"?, "clicks":1..3?}
   {"type":"move", "x":int, "y":int}
   {"type":"type", "text":str, "interval_ms":int?}
@@ -24,12 +26,32 @@ Action variants (discriminated by "type"):
                    "range":str?, "values":[[str,...],...]?, "vba_code":str?}
   {"type":"screenshot"}
 
+[Coding agent]
+  {"type":"file_read", "path":str, "offset":int?, "limit":int?, "max_bytes":int?}
+  {"type":"file_write", "path":str, "content":str, "create_dirs":bool?}
+  {"type":"file_edit", "path":str, "old_string":str, "new_string":str, "replace_all":bool?}
+  {"type":"file_delete", "path":str}
+  {"type":"list_dir", "path":str, "recursive":bool?, "max_entries":int?}
+  {"type":"apply_patch", "path":str, "edits":[{"old_string":str,"new_string":str,"replace_all":bool?}, ...]}
+  {"type":"shell", "command":str, "cwd":str?, "timeout_s":int?}
+  {"type":"grep", "pattern":str, "path":str?, "glob_pattern":str?, "case_insensitive":bool?,
+                  "context_lines":int?, "output_mode":"content|files_with_matches|count"?, "max_results":int?}
+  {"type":"find_files", "pattern":str, "path":str?, "max_results":int?}
+
 Rules:
+- Prefer **coding-agent actions** for software tasks; only use desktop actions
+  when the user explicitly asks to drive a GUI app.
+- Before editing a file, read or grep the relevant context first; never edit
+  blindly. ``apply_patch`` is preferred over ``file_write`` for modifying code.
+- Keep plans short (<= 8 actions). When verification is needed, request a
+  ``screenshot`` (desktop) or a ``file_read``/``shell`` (coding) and stop —
+  the next cycle will give you fresh state.
 - Coordinates must be inside the visible screen.
 - Prefer hotkeys (e.g. ["win"], ["ctrl","s"]) over hunting for buttons.
-- Keep plans short (<= 8 actions); request a fresh screenshot to verify state.
-- Never output destructive shell commands (rm/format/shutdown/etc.).
-- Always populate memory_update.current_goal when starting a new task.
+- Never output destructive shell commands (rm -rf, format, shutdown, etc.).
+- Always populate ``memory_update.current_goal`` when starting a new task.
+- All paths are resolved against the project root; do not use absolute paths
+  outside the project unless explicitly told to.
 """
 
 FEW_SHOT = [
@@ -112,6 +134,66 @@ FEW_SHOT = [
             },
         },
     },
+    {
+        "command": "find where MAX_RETRIES is defined and bump it to 5",
+        "memory": {
+            "recent_commands": [],
+            "recent_actions": [],
+            "current_goal": None,
+            "notes": None,
+        },
+        "response": {
+            "actions": [
+                {
+                    "type": "grep",
+                    "pattern": r"\bMAX_RETRIES\s*=",
+                    "path": ".",
+                    "output_mode": "content",
+                },
+            ],
+            "memory_update": {
+                "current_goal": "Locate MAX_RETRIES then bump to 5",
+                "notes": "Need grep results before editing.",
+            },
+        },
+    },
+    {
+        "command": "now bump it",
+        "memory": {
+            "recent_commands": ["find where MAX_RETRIES is defined and bump it to 5"],
+            "recent_actions": [
+                {
+                    "type": "grep",
+                    "result": "src/config.py:14:MAX_RETRIES = 3",
+                },
+            ],
+            "current_goal": "Locate MAX_RETRIES then bump to 5",
+            "notes": None,
+        },
+        "response": {
+            "actions": [
+                {
+                    "type": "apply_patch",
+                    "path": "src/config.py",
+                    "edits": [
+                        {
+                            "old_string": "MAX_RETRIES = 3",
+                            "new_string": "MAX_RETRIES = 5",
+                        }
+                    ],
+                },
+                {
+                    "type": "shell",
+                    "command": "python -m pytest -q tests/test_config.py",
+                    "timeout_s": 60,
+                },
+            ],
+            "memory_update": {
+                "current_goal": "Verify MAX_RETRIES bump",
+                "notes": "Patched src/config.py:14; running config tests.",
+            },
+        },
+    },
 ]
 
 
@@ -122,7 +204,9 @@ def build_system_instruction() -> str:
         for ex in FEW_SHOT
     )
     return (
-        "You are WinAgent, a Windows desktop automation planner. "
+        "You are WinAgent, a multimodal coding + desktop-automation agent. "
+        "You can read/edit code, run shell commands, search a codebase, and "
+        "(when needed) drive the Windows desktop or Excel. "
         "You see the user's screen and plan minimal, safe action sequences. "
         "Think step-by-step internally (ReAct), but OUTPUT ONLY valid JSON "
         "matching the schema.\n\n"
@@ -134,10 +218,13 @@ def build_user_prompt(
     command: str,
     screen_size: tuple[int, int],
     memory: dict[str, Any],
+    project_root: str | None = None,
 ) -> str:
+    root_line = f"PROJECT_ROOT: {project_root}\n" if project_root else ""
     return (
         f"SCREEN_SIZE: {screen_size[0]}x{screen_size[1]} "
-        f"(the screenshot is attached)\n"
+        f"(the screenshot is attached if present)\n"
+        f"{root_line}"
         f"MEMORY: {json.dumps(memory, ensure_ascii=False)}\n"
         f"USER COMMAND: {command}\n"
         "Return only the JSON object."

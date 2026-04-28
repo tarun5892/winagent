@@ -6,17 +6,27 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from . import coding_tools
 from .config import CONFIG
 from .logger import get_logger
 from .schema import (
     Action,
+    ApplyPatchAction,
     ClickAction,
     ExcelAction,
+    FileDeleteAction,
+    FileEditAction,
+    FileReadAction,
+    FileWriteAction,
+    FindFilesAction,
+    GrepAction,
     HotkeyAction,
+    ListDirAction,
     MoveAction,
     PowerShellAction,
     ScreenshotAction,
     ScrollAction,
+    ShellAction,
     TypeAction,
     WaitAction,
 )
@@ -37,7 +47,8 @@ def _import_pyautogui():
 class Executor:
     """Dispatches validated ``Action`` objects to platform handlers."""
 
-    def __init__(self) -> None:
+    def __init__(self, project_root: str | None = None) -> None:
+        self.project_root: str = project_root or coding_tools.default_project_root()
         self._handlers: dict[type, Handler] = {
             ClickAction: self._click,
             MoveAction: self._move,
@@ -48,6 +59,15 @@ class Executor:
             PowerShellAction: self._powershell,
             ExcelAction: self._excel,
             ScreenshotAction: self._screenshot,
+            FileReadAction: self._file_read,
+            FileWriteAction: self._file_write,
+            FileEditAction: self._file_edit,
+            FileDeleteAction: self._file_delete,
+            ListDirAction: self._list_dir,
+            ApplyPatchAction: self._apply_patch,
+            ShellAction: self._shell,
+            GrepAction: self._grep,
+            FindFilesAction: self._find_files,
         }
 
     def run(self, actions: list[Action]) -> list[dict[str, Any]]:
@@ -195,3 +215,31 @@ class Executor:
             return {"op": op}
 
         raise ValueError(f"unsupported excel op: {op}")
+
+    # ---- coding-agent handlers -------------------------------------------
+    def _file_read(self, a: FileReadAction) -> dict[str, Any]:
+        return coding_tools.file_read(a, self.project_root)
+
+    def _file_write(self, a: FileWriteAction) -> dict[str, Any]:
+        return coding_tools.file_write(a, self.project_root)
+
+    def _file_edit(self, a: FileEditAction) -> dict[str, Any]:
+        return coding_tools.file_edit(a, self.project_root)
+
+    def _file_delete(self, a: FileDeleteAction) -> dict[str, Any]:
+        return coding_tools.file_delete(a, self.project_root)
+
+    def _list_dir(self, a: ListDirAction) -> dict[str, Any]:
+        return coding_tools.list_dir(a, self.project_root)
+
+    def _apply_patch(self, a: ApplyPatchAction) -> dict[str, Any]:
+        return coding_tools.apply_patch(a, self.project_root)
+
+    def _shell(self, a: ShellAction) -> dict[str, Any]:
+        return coding_tools.shell_run(a, self.project_root)
+
+    def _grep(self, a: GrepAction) -> dict[str, Any]:
+        return coding_tools.grep_search(a, self.project_root)
+
+    def _find_files(self, a: FindFilesAction) -> dict[str, Any]:
+        return coding_tools.find_files(a, self.project_root)
