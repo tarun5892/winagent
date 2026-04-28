@@ -44,8 +44,6 @@ jobs:
         run: pyinstaller --noconfirm --clean winagent.spec
 
       - name: Smoke-test the built executable
-        # We can't open a GUI in CI, but we can verify the binary launches
-        # and the imports succeed by running it with a quick exit.
         shell: pwsh
         run: |
           if (-not (Test-Path "dist/winagent.exe")) {
@@ -54,6 +52,11 @@ jobs:
           }
           $size = (Get-Item "dist/winagent.exe").Length
           Write-Host "winagent.exe size: $([math]::Round($size/1MB,1)) MB"
+
+      - name: Verify bundle imports cleanly
+        # Catches PyInstaller-bundling bugs (relative imports, missing hidden
+        # imports, etc.) by running --check-only inside the bundled Python.
+        run: python scripts/smoke_test_exe.py dist/winagent.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

@@ -29,7 +29,7 @@ hiddenimports += [
 ]
 
 a = Analysis(
-    ["winagent/__main__.py"],
+    ["run_winagent.py"],
     pathex=[],
     binaries=binaries,
     datas=datas,
