@@ -145,14 +145,35 @@ class _FakeResponse:
         self.text = text
 
 
+class _FakeStream:
+    """Iterator emitting incremental chunks then EOF."""
+
+    def __init__(self, chunks: list[str]) -> None:
+        self._iter = iter(_FakeResponse(c) for c in chunks)
+
+    def __iter__(self) -> _FakeStream:
+        return self
+
+    def __next__(self) -> _FakeResponse:
+        return next(self._iter)
+
+
 class FakeGenerativeModel:
     def __init__(self, model: str, **_: Any) -> None:
         self.model = model
         self.calls: list[dict[str, Any]] = []
         self.next_response: str = json.dumps({"actions": [], "memory_update": None})
+        # If set, streaming responses split next_response into these pieces;
+        # otherwise the full text is delivered as one chunk.
+        self.next_chunks: list[str] | None = None
 
-    def generate_content(self, parts: Any, **kw: Any) -> _FakeResponse:
-        self.calls.append({"parts": parts, **kw})
+    def generate_content(
+        self, parts: Any, stream: bool = False, **kw: Any
+    ) -> _FakeResponse | _FakeStream:
+        self.calls.append({"parts": parts, "stream": stream, **kw})
+        if stream:
+            chunks = self.next_chunks if self.next_chunks is not None else [self.next_response]
+            return _FakeStream(chunks)
         return _FakeResponse(self.next_response)
 
 

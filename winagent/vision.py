@@ -21,7 +21,7 @@ def capture_screen(
 
     if img.width > max_width:
         ratio = max_width / img.width
-        img = img.resize((max_width, int(img.height * ratio)), Image.LANCZOS)
+        img = img.resize((max_width, int(img.height * ratio)), Image.Resampling.LANCZOS)
 
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=quality, optimize=True)

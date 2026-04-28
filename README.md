@@ -1,30 +1,40 @@
 # WinAgent
 
-A lightweight, multimodal **Windows desktop AI agent**. Type a command,
-WinAgent screenshots your desktop, sends image + command + short-term memory
-to **Gemini 2.5 Pro**, and executes the returned plan via PyAutoGUI,
-PowerShell, and Excel COM automation.
+A lightweight, multimodal **coding agent + Windows desktop automation agent**
+backed by **Gemini 2.5 Pro**. Type a command and WinAgent reads/edits your
+codebase, runs shell commands, searches with grep, and (optionally)
+screenshots and drives the Windows desktop or Excel.
 
 ## Highlights
 
-- Strict JSON action schema (Pydantic-validated) — no free-form code execution.
-- Short-term memory (rolling deque) injected into every prompt for multi-step continuity.
-- Safety layer blocks destructive shell ops; optional confirmation dialog.
+- **Coding-agent toolset**: `file_read` / `file_write` / `file_edit` /
+  `apply_patch` / `file_delete` / `list_dir` / `shell` / `grep` / `find_files`.
+- **Desktop automation**: `click` / `type` / `hotkey` / `scroll` / `wait` /
+  `powershell` / `excel` / `screenshot`.
+- **Streaming Gemini responses** for snappy feedback.
+- **Strict JSON schema** (Pydantic) — no free-form code execution.
+- **Short-term rolling memory** (deque) injected into every prompt for
+  multi-step continuity.
+- **Per-action safety policy**: read-only actions auto-allow, mutating
+  actions confirm, destructive shell hard-blocked, project-root sandbox.
 - Modular, event-driven; easy to add new action types.
-- ~10 modules, no heavyweight frameworks.
 
 ## Architecture
 
 ```
 tkinter UI ──submit──▶ Orchestrator (worker thread)
                         │
-                        ├─▶ Vision (MSS) ──▶ Gemini 2.5 Pro ──▶ JSON
-                        │                                       │
-                        │                            Pydantic validation
-                        │                                       │
-                        ├─▶ Memory (deque + goal) ◀──update────┤
-                        │                                       │
-                        └─▶ Safety ──▶ Executor (pyautogui / PowerShell / Excel COM)
+                        ├─▶ Vision (MSS, optional) ──▶ Gemini 2.5 Pro (streaming) ──▶ JSON
+                        │                                                            │
+                        │                                              Pydantic validation
+                        │                                                            │
+                        ├─▶ Memory (deque + goal) ◀───────update────────────────────┤
+                        │                                                            │
+                        └─▶ Safety ──▶ Executor
+                                          │
+                                          ├─ coding tools (file/shell/grep/patch)
+                                          ├─ desktop tools (pyautogui/PowerShell)
+                                          └─ Excel COM (pywin32)
 ```
 
 ## Install
@@ -51,10 +61,16 @@ python -m winagent
 ```jsonc
 {
   "actions": [
+    // Coding agent
+    {"type": "grep", "pattern": "MAX_RETRIES"},
+    {"type": "file_read", "path": "src/config.py"},
+    {"type": "apply_patch", "path": "src/config.py",
+     "edits": [{"old_string": "MAX_RETRIES = 3", "new_string": "MAX_RETRIES = 5"}]},
+    {"type": "shell", "command": "python -m pytest -q"},
+
+    // Desktop / Excel
     {"type": "click", "x": 500, "y": 300},
-    {"type": "type",  "text": "Hello"},
     {"type": "hotkey", "keys": ["ctrl", "s"]},
-    {"type": "powershell", "command": "Get-Process"},
     {"type": "excel", "operation": "write_cell", "cell": "A1", "value": "Test"}
   ],
   "memory_update": {"current_goal": "...", "notes": "..."}
@@ -62,7 +78,16 @@ python -m winagent
 ```
 
 Full list: `click`, `move`, `type`, `hotkey`, `scroll`, `wait`,
-`powershell`, `excel`, `screenshot`. See `winagent/schema.py`.
+`powershell`, `excel`, `screenshot`, `file_read`, `file_write`, `file_edit`,
+`file_delete`, `list_dir`, `apply_patch`, `shell`, `grep`, `find_files`.
+See `winagent/schema.py`.
+
+### Project root
+
+Coding-agent actions resolve paths against `WINAGENT_PROJECT_ROOT`
+(defaults to the current working directory). Paths that escape the project
+root raise `PermissionError`. Set the env var to your repo to scope the
+agent: `set WINAGENT_PROJECT_ROOT=C:\path\to\your\project`.
 
 ## Development
 
@@ -79,11 +104,20 @@ Live integration on Windows requires a real `GEMINI_API_KEY` and a real desktop.
 
 ## Safety
 
-- Destructive PowerShell commands (`shutdown`, `Format-Volume`, `Remove-Item -Recurse`,
-  `Restart-Computer`, `diskpart`, `Iex … Net.WebClient …`, etc.) are blocked
-  before execution. Extend the regex list in `winagent/safety.py` as needed.
-- Confirmation mode (default ON): the GUI prompts before executing any plan.
-- PyAutoGUI failsafe is enabled — flick the mouse to a screen corner to abort.
+- **Hard-blocked commands** (`shutdown`, `Format-Volume`, `Remove-Item -Recurse`,
+  `rm -rf /`, `dd if=/dev/...`, `chmod -R 777 /`, fork bombs, etc.) are
+  filtered out before execution. Extend the regex lists in
+  `winagent/safety.py` and `winagent/coding_tools.py` as needed.
+- **Per-action confirmation policy**:
+  - Read-only actions (`file_read`, `list_dir`, `grep`, `find_files`):
+    auto-allowed even when confirmation mode is on.
+  - Mutating actions (`file_write`, `file_edit`, `apply_patch`,
+    `file_delete`, plus all desktop/Excel/shell actions): require
+    confirmation when the dialog is enabled.
+- **Project-root sandbox**: every coding action's path is resolved relative
+  to `project_root` and rejected if it escapes.
+- **PyAutoGUI failsafe** is enabled — flick the mouse to a screen corner
+  to abort runaway desktop automation.
 
 ## License
 
