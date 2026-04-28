@@ -26,9 +26,20 @@ class GeminiClient:
         model: str | None = None,
         streaming: bool | None = None,
     ) -> None:
+        import os
+
         import google.generativeai as genai
 
-        key = api_key or CONFIG.gemini_api_key
+        from . import user_config
+
+        # CONFIG is frozen at import time; fall back to current env / saved
+        # config so a key supplied by the first-run dialog is honored.
+        key = (
+            api_key
+            or CONFIG.gemini_api_key
+            or os.environ.get("GEMINI_API_KEY", "")
+            or (user_config.get_api_key() or "")
+        )
         if not key:
             raise RuntimeError("GEMINI_API_KEY not set")
         genai.configure(api_key=key)

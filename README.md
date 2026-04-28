@@ -37,23 +37,51 @@ tkinter UI ──submit──▶ Orchestrator (worker thread)
                                           └─ Excel COM (pywin32)
 ```
 
-## Install
+## Download (Windows)
 
-Requires Python 3.10+ on Windows.
+Pre-built **`winagent.exe`** is produced by GitHub Actions on every push to
+`main`. No Python install required.
+
+1. Go to the **[Actions tab](https://github.com/tarun5892/winagent/actions/workflows/build.yml)**.
+2. Click the latest successful run.
+3. Under **Artifacts**, download `winagent-windows-x64`.
+4. Unzip → double-click `winagent.exe`.
+5. On first launch a popup asks for your free Gemini API key
+   (get one at <https://aistudio.google.com/app/apikey>); it's saved to
+   `%APPDATA%\WinAgent\config.json` so you only enter it once.
+
+Tagged releases (`git tag v0.2.0 && git push --tags`) also attach
+`winagent.exe` to a [GitHub Release](https://github.com/tarun5892/winagent/releases).
+
+## Install from source
+
+Requires Python 3.10+.
 
 ```powershell
-git clone <repo-url> winagent
+git clone https://github.com/tarun5892/winagent.git
 cd winagent
 python -m venv .venv
 .venv\Scripts\activate
-pip install -e .
+pip install -e ".[dev]"
 ```
 
 ## Run
 
 ```powershell
+# Option 1 (recommended): just launch and use the first-run popup
+python -m winagent
+
+# Option 2: pre-set the key as an env var
 $env:GEMINI_API_KEY="your_key"
 python -m winagent
+```
+
+To build the Windows .exe locally:
+
+```powershell
+pip install pyinstaller==6.10.0
+pyinstaller --noconfirm --clean winagent.spec
+# Output: dist\winagent.exe
 ```
 
 ## Action schema

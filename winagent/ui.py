@@ -4,12 +4,81 @@ from __future__ import annotations
 import logging
 import queue
 import tkinter as tk
+import webbrowser
 from tkinter import messagebox, scrolledtext
 
 from .logger import LOG_QUEUE, setup_logging
 from .orchestrator import Orchestrator
 
 POLL_MS = 100
+APIKEY_HELP_URL = "https://aistudio.google.com/app/apikey"
+
+
+def prompt_for_api_key(parent: tk.Misc | None = None) -> str | None:
+    """First-run modal that asks the user for a Gemini API key.
+
+    Returns the entered key (stripped) or ``None`` if the user cancelled.
+    """
+    owns_root = parent is None
+    root = tk.Tk() if owns_root else tk.Toplevel(parent)
+    root.title("WinAgent — first-run setup")
+    root.geometry("520x230")
+    root.resizable(False, False)
+
+    tk.Label(
+        root,
+        text="Welcome to WinAgent",
+        font=("Segoe UI", 14, "bold"),
+    ).pack(pady=(14, 4))
+    tk.Label(
+        root,
+        text=(
+            "Paste your free Gemini API key below.\n"
+            "You only need to do this once — it's saved to:\n"
+            "%APPDATA%\\WinAgent\\config.json"
+        ),
+        justify="center",
+    ).pack(pady=(0, 6))
+
+    link = tk.Label(
+        root,
+        text="Get a free key →",
+        fg="#1a73e8",
+        cursor="hand2",
+    )
+    link.pack()
+    link.bind("<Button-1>", lambda _e: webbrowser.open(APIKEY_HELP_URL))
+
+    var = tk.StringVar()
+    entry = tk.Entry(root, textvariable=var, show="*", width=54)
+    entry.pack(pady=10)
+    entry.focus_set()
+
+    result: dict[str, str | None] = {"key": None}
+
+    def submit(_e: object | None = None) -> None:
+        v = var.get().strip()
+        if not v:
+            messagebox.showwarning("WinAgent", "API key cannot be empty.", parent=root)
+            return
+        result["key"] = v
+        root.destroy()
+
+    def cancel() -> None:
+        root.destroy()
+
+    btns = tk.Frame(root)
+    btns.pack(pady=8)
+    tk.Button(btns, text="Save & continue", width=16, command=submit).pack(side=tk.LEFT, padx=6)
+    tk.Button(btns, text="Skip", width=10, command=cancel).pack(side=tk.LEFT, padx=6)
+    entry.bind("<Return>", submit)
+
+    root.protocol("WM_DELETE_WINDOW", cancel)
+    if owns_root:
+        root.mainloop()
+    else:
+        root.wait_window()
+    return result["key"]
 
 
 class WinAgentUI:
