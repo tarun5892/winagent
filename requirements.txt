@@ -1,0 +1,6 @@
+google-generativeai>=0.7.0
+pyautogui>=0.9.54
+mss>=9.0.1
+Pillow>=10.0.0
+pywin32>=306 ; sys_platform == "win32"
+pydantic>=2.5.0
