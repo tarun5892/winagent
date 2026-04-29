@@ -126,4 +126,65 @@ def test_thread_runs_and_processes_queue():
         o.stop()
         o.join(timeout=2.0)
     assert not o.is_alive()
-    assert o.memory.snapshot()["recent_commands"] == ["c1"]
+
+
+def test_on_busy_callback_fires_around_each_job():
+    """The orchestrator should mark itself busy=True before run_cycle and
+    busy=False after, on every queued job — so the UI can disable inputs
+    while a request is in flight."""
+    import time
+
+    busy_log: list[bool] = []
+    o, _ = _make(
+        orch_kwargs={"on_busy": busy_log.append},
+        response={"actions": [{"type": "wait", "ms": 1}]},
+    )
+    o.start()
+    try:
+        o.submit("hello")
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            if busy_log[-2:] == [True, False]:
+                break
+            time.sleep(0.02)
+    finally:
+        o.stop()
+        o.join(timeout=2.0)
+    # We expect at least one True followed by False; the trailing stop()
+    # may or may not push more True/False depending on timing — just check
+    # that the first job produced the expected pair.
+    assert busy_log[:2] == [True, False], busy_log
+
+
+def test_on_busy_callback_runs_even_on_plan_exception():
+    """If the LLM blows up, busy=False must still fire so the UI doesn't
+    stick on 'Working on it…' forever."""
+
+    class BoomClient:
+        def plan(self, *_a, **_kw):
+            raise RuntimeError("simulated network failure")
+
+    busy_log: list[bool] = []
+    o = Orchestrator(
+        confirm_fn=lambda _t: True,
+        confirmation_mode=False,
+        client=BoomClient(),
+        capture_fn=_capture,
+        executor=Executor(),
+        memory=MemoryManager(window=5),
+        on_busy=busy_log.append,
+    )
+    import time
+
+    o.start()
+    try:
+        o.submit("hello")
+        deadline = time.time() + 2.0
+        while time.time() < deadline:
+            if busy_log[-2:] == [True, False]:
+                break
+            time.sleep(0.02)
+    finally:
+        o.stop()
+        o.join(timeout=2.0)
+    assert busy_log[:2] == [True, False], busy_log

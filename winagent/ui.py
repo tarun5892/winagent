@@ -312,6 +312,10 @@ class WinAgentUI:
         self.root.geometry("1080x680")
         self.root.minsize(840, 540)
 
+        # State that the layout helpers register into.
+        self._busy: bool = False
+        self._quick_buttons: list[ttk.Button] = []
+
         self._build_header()
         self._build_body()
         self._build_input_bar()
@@ -320,7 +324,12 @@ class WinAgentUI:
         self.orch = orchestrator or Orchestrator(
             confirm_fn=self._confirm_dialog,
             confirmation_mode=True,
+            on_busy=self._on_busy_change,
         )
+        # If a pre-built orchestrator was passed in, give it our busy callback
+        # so the UI still updates while a job runs.
+        if orchestrator is not None and self.orch._on_busy is None:
+            self.orch._on_busy = self._on_busy_change
         if not self.orch.is_alive():
             self.orch.start()
 
@@ -459,13 +468,15 @@ class WinAgentUI:
         ttk.Label(bar, textvariable=self.status, style="Subtle.TLabel").pack(side=tk.RIGHT)
 
     def _add_quick_action(self, parent: ttk.Frame, label: str, command: str) -> None:
-        ttk.Button(
+        btn = ttk.Button(
             parent,
             text=label,
             style="Quick.TButton",
             width=22,
             command=lambda: self._fill_command(command),
-        ).pack(fill=tk.X, pady=2)
+        )
+        btn.pack(fill=tk.X, pady=2)
+        self._quick_buttons.append(btn)
 
     # -- handlers -----------------------------------------------------------
     def _fill_command(self, command: str) -> None:
@@ -474,12 +485,22 @@ class WinAgentUI:
         self.entry.focus_set()
 
     def _on_submit(self) -> None:
+        if self._busy:
+            # The UI guards against re-entry: while the agent is working we
+            # ignore further submissions and remind the user we're on it.
+            self._append_log(
+                "[ui] still working on the previous request — please wait…",
+                "WARNING",
+            )
+            return
         cmd = self.entry.get().strip()
         if not cmd:
             return
         self.entry.delete(0, tk.END)
-        self._set_status("running", THEME["warn"], "●  Running")
         self._append_log(f"> {cmd}", "ME")
+        # Status pill flips immediately for snappy feedback even before the
+        # orchestrator's busy callback fires.
+        self._set_busy(True)
         self.orch.submit(cmd)
 
     def _toggle_confirm(self) -> None:
@@ -595,12 +616,39 @@ class WinAgentUI:
         self.log.insert(tk.END, line + "\n", tag)
         self.log.see(tk.END)
         self.log.configure(state=tk.DISABLED)
-        # Reset status pill to Ready after each log line (LLM finished a step).
-        self._set_status("ready", THEME["ok"], "●  Ready")
 
     def _set_status(self, key: str, color: str, label: str) -> None:
         self.status_pill.configure(text=label, fg=color)
-        self.status.set({"ready": "Ready", "running": "Running…"}.get(key, key))
+        self.status.set(
+            {"ready": "Ready", "running": "Working on it…"}.get(key, key)
+        )
+
+    # -- busy state ---------------------------------------------------------
+    def _on_busy_change(self, busy: bool) -> None:
+        """Thread-safe entry point for the orchestrator's on_busy callback.
+
+        Marshals the state change onto the Tk main thread.
+        """
+        try:
+            self.root.after(0, lambda: self._set_busy(busy))
+        except RuntimeError:
+            # Tk root has been destroyed (app shutting down) — nothing to do.
+            pass
+
+    def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
+        if busy:
+            self._set_status("running", THEME["warn"], "●  Working on it…")
+        else:
+            self._set_status("ready", THEME["ok"], "●  Ready")
+        state = ("disabled",) if busy else ("!disabled",)
+        try:
+            self.submit_btn.state(state)
+            self.entry.state(state)
+            for b in self._quick_buttons:
+                b.state(state)
+        except tk.TclError:
+            pass
 
     def _on_close(self) -> None:
         self.orch.stop()

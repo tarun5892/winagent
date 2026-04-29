@@ -309,13 +309,19 @@ def find_files(a: FindFilesAction, project_root: str) -> dict[str, Any]:
 _SHELL_DESTRUCTIVE = re.compile(
     r"""
     (?:
-        \brm\s+(?:[^\n]*-r[fF]?[^\n]*)              # rm -rf
+        \brm\s+[^\n]*(?:-[a-z]*r[a-z]*|--recursive|-[a-z]*f[a-z]*|--force)\b   # rm -rf, -fr, -Rf, --recursive, etc.
       | \bsudo\s+rm\b
       | \bmkfs\b
       | \bdd\s+if=                                  # dd if=...
-      | :\(\)\{\s*:\|\:&\s*\};:                     # fork bomb
+      | :\s*\(\s*\)\s*\{\s*:\s*\|\s*:?\s*&\s*\}\s*;\s*:    # fork bomb (any spacing)
       | \b(?:reboot|halt|shutdown|poweroff)\b
-      | \bchmod\s+(?:-R\s+)?0?777\s+/                # chmod 777 /
+      | \binit\s+[0-6]\b                            # init 0/6 (halt/reboot)
+      | \btelinit\s+[0-6]\b
+      | \bchmod\s+(?:-R\s+)?0?[0-7]{0,2}[0-7]\s+/   # chmod NNN /  (000, 777, etc.)
+      | \bchown\s+(?:-R\s+)?\S+\s+/(?:\s|$)         # chown ... /
+      | (?<![<>])>\s*/dev/(?:sd[a-z]|hd[a-z]|nvme\d+n\d+|disk\d+)\b   # > /dev/sda, > /dev/nvme0n1
+      | (?:wget|curl)\s+[^\n]*\|\s*(?:sh|bash|zsh|ksh)\b              # curl|sh, wget|bash
+      | \bmv\s+[^\n]+\s+/dev/null\b                  # mv ... /dev/null (data loss)
     )
     """,
     re.VERBOSE | re.IGNORECASE,

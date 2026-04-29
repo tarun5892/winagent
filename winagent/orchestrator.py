@@ -34,6 +34,7 @@ class Orchestrator(threading.Thread):
         capture_fn: Callable[[], tuple[bytes, tuple[int, int]]] | None = None,
         executor: Executor | None = None,
         memory: MemoryManager | None = None,
+        on_busy: Callable[[bool], None] | None = None,
     ) -> None:
         super().__init__(daemon=True, name="winagent-orch")
         self.queue: queue.Queue[Job | None] = queue.Queue()
@@ -43,6 +44,7 @@ class Orchestrator(threading.Thread):
         self._client = client
         self._capture = capture_fn
         self._stop_event = threading.Event()
+        self._on_busy = on_busy
 
     @property
     def client(self) -> Any:
@@ -73,11 +75,22 @@ class Orchestrator(threading.Thread):
             job = self.queue.get()
             if job is None:
                 break
+            self._notify_busy(True)
             try:
                 self.run_cycle(job)
             except Exception:
                 log.exception("cycle failed")
+            finally:
+                self._notify_busy(False)
         log.info("orchestrator stopped")
+
+    def _notify_busy(self, busy: bool) -> None:
+        if self._on_busy is None:
+            return
+        try:
+            self._on_busy(busy)
+        except Exception:  # noqa: BLE001
+            log.exception("on_busy callback raised")
 
     def run_cycle(self, job: Job) -> None:
         """Single perceive-plan-act cycle. Public for testability."""
