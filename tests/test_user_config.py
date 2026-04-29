@@ -92,3 +92,91 @@ def test_save_sets_user_only_perms(fake_home: Path):
     p = user_config.set_api_key("k")
     mode = p.stat().st_mode & 0o777
     assert mode == 0o600
+
+
+# ---------------------------------------------------------------------------
+# Multi-provider helpers
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def isolated_provider_env(
+    fake_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    for v in ("OPENROUTER_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY"):
+        monkeypatch.delenv(v, raising=False)
+    return fake_home
+
+
+def test_get_provider_default(isolated_provider_env: Path):
+    assert user_config.get_provider() == "gemini"
+
+
+def test_set_and_get_provider_roundtrip(isolated_provider_env: Path):
+    user_config.set_provider("groq")
+    assert user_config.get_provider() == "groq"
+
+
+def test_set_provider_rejects_unknown(isolated_provider_env: Path):
+    with pytest.raises(ValueError):
+        user_config.set_provider("nonsense")
+
+
+def test_get_provider_falls_back_when_value_invalid(
+    isolated_provider_env: Path,
+):
+    user_config.save({"provider": "garbage"})
+    assert user_config.get_provider() == "gemini"
+
+
+def test_set_and_get_provider_api_key_roundtrip(isolated_provider_env: Path):
+    user_config.set_provider_api_key("openrouter", "  or-key  ")
+    assert user_config.get_provider_api_key("openrouter") == "or-key"
+    assert os.environ.get("OPENROUTER_API_KEY") == "or-key"
+
+
+def test_set_provider_api_key_rejects_empty(isolated_provider_env: Path):
+    with pytest.raises(ValueError):
+        user_config.set_provider_api_key("groq", "   ")
+
+
+def test_set_provider_api_key_rejects_unknown_provider(
+    isolated_provider_env: Path,
+):
+    with pytest.raises(ValueError):
+        user_config.set_provider_api_key("totally-unknown", "k")
+
+
+def test_get_provider_api_key_env_wins_over_disk(
+    isolated_provider_env: Path, monkeypatch: pytest.MonkeyPatch
+):
+    user_config.set_provider_api_key("groq", "from-disk")
+    monkeypatch.setenv("GROQ_API_KEY", "from-env")
+    assert user_config.get_provider_api_key("groq") == "from-env"
+
+
+def test_legacy_gemini_field_still_resolves(isolated_provider_env: Path):
+    """Old PR #3 configs stored ``gemini_api_key`` flat — must still load."""
+    user_config.save({"gemini_api_key": "legacy"})
+    assert user_config.get_provider_api_key("gemini") == "legacy"
+    assert user_config.get_api_key() == "legacy"
+
+
+def test_set_gemini_key_mirrors_legacy_field(isolated_provider_env: Path):
+    """Setting the gemini key writes BOTH the nested + legacy field."""
+    user_config.set_provider_api_key("gemini", "k")
+    data = user_config.load()
+    assert data["gemini_api_key"] == "k"
+    assert data["providers"]["gemini"]["api_key"] == "k"
+
+
+def test_set_and_get_provider_model_roundtrip(isolated_provider_env: Path):
+    user_config.set_provider_model("groq", "llama-fast")
+    assert user_config.get_provider_model("groq") == "llama-fast"
+
+
+def test_provider_keys_are_independent(isolated_provider_env: Path):
+    user_config.set_provider_api_key("openrouter", "or-key")
+    user_config.set_provider_api_key("groq", "groq-key")
+    user_config.set_provider_api_key("mistral", "mistral-key")
+    assert user_config.get_provider_api_key("openrouter") == "or-key"
+    assert user_config.get_provider_api_key("groq") == "groq-key"
+    assert user_config.get_provider_api_key("mistral") == "mistral-key"

@@ -8,7 +8,8 @@ import os
 import sys
 
 from winagent import user_config
-from winagent.ui import WinAgentUI, prompt_for_api_key
+from winagent.llm_base import PROVIDER_KEY_ENV
+from winagent.ui import WinAgentUI, prompt_for_provider_setup
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -27,8 +28,10 @@ def main(argv: list[str] | None = None) -> int:
             config,
             executor,
             gemini_client,
+            llm_base,
             logger,
             memory,
+            openai_compat_client,
             orchestrator,
             prompts,
             safety,
@@ -41,21 +44,28 @@ def main(argv: list[str] | None = None) -> int:
         # console attached, so print() can raise. Exit 0 is the signal.
         return 0
 
-    # Resolve the Gemini API key before constructing the orchestrator so the
-    # GeminiClient (lazy-loaded later) sees it. Env var > saved config > popup.
-    if not user_config.get_api_key():
-        key = prompt_for_api_key()
-        if key:
-            user_config.set_api_key(key)
-        # If the user dismisses the dialog we still launch the UI; the first
-        # plan() call will surface a clear "GEMINI_API_KEY not set" error in
+    # Resolve the active provider + key before constructing the orchestrator.
+    # Env var > saved config > first-run popup.
+    provider = user_config.get_provider()
+    if not user_config.get_provider_api_key(provider):
+        choice = prompt_for_provider_setup(initial_provider=provider)
+        if choice is not None:
+            new_provider, new_key, new_model = choice
+            user_config.set_provider(new_provider)
+            user_config.set_provider_api_key(new_provider, new_key)
+            if new_model:
+                user_config.set_provider_model(new_provider, new_model)
+            provider = new_provider
+        # If the user dismissed the dialog we still launch the UI; the first
+        # plan() call surfaces a clear "<PROVIDER>_API_KEY not set" error in
         # the log, which is friendlier than crashing on launch.
-    else:
-        # Make sure the env var is populated even if the value came from disk,
-        # since CONFIG was frozen at import time.
-        saved = user_config.get_api_key()
-        if saved and not os.environ.get("GEMINI_API_KEY"):
-            os.environ["GEMINI_API_KEY"] = saved
+
+    # Make sure the provider's env var is populated even if the value came
+    # from disk (CONFIG was frozen at module-import time).
+    saved_key = user_config.get_provider_api_key(provider)
+    env_name = PROVIDER_KEY_ENV.get(provider, "")
+    if saved_key and env_name and not os.environ.get(env_name):
+        os.environ[env_name] = saved_key
 
     WinAgentUI().run()
     return 0

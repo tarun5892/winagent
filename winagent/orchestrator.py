@@ -47,9 +47,9 @@ class Orchestrator(threading.Thread):
     @property
     def client(self) -> Any:
         if self._client is None:
-            from .gemini_client import GeminiClient
+            from .llm_base import make_client
 
-            self._client = GeminiClient()
+            self._client = make_client()
         return self._client
 
     @property

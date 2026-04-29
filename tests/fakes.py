@@ -195,3 +195,76 @@ class FakeGenAI:
         m = FakeGenerativeModel(model, **kw)
         self.last_model = m
         return m
+
+
+# ---------------------------------------------------------------------------
+# OpenAI-compatible fake (looks/feels like openai>=1.x)
+# ---------------------------------------------------------------------------
+class _FakeChoiceMsg:
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+
+class _FakeChoice:
+    def __init__(self, content: str) -> None:
+        self.message = _FakeChoiceMsg(content)
+
+
+class _FakeCompletion:
+    def __init__(self, content: str) -> None:
+        self.choices = [_FakeChoice(content)]
+
+
+class _FakeDelta:
+    def __init__(self, content: str | None) -> None:
+        self.content = content
+
+
+class _FakeStreamChoice:
+    def __init__(self, content: str | None) -> None:
+        self.delta = _FakeDelta(content)
+
+
+class _FakeStreamEvent:
+    def __init__(self, content: str | None) -> None:
+        self.choices = [_FakeStreamChoice(content)]
+
+
+class FakeOpenAICompletions:
+    """Captures :meth:`create` kwargs and returns a scripted response."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.next_content: str = json.dumps({"actions": [], "memory_update": None})
+        self.next_chunks: list[str] | None = None
+
+    def create(self, **kw: Any) -> Any:
+        self.calls.append(kw)
+        if kw.get("stream"):
+            chunks = (
+                self.next_chunks
+                if self.next_chunks is not None
+                else [self.next_content]
+            )
+            return iter(_FakeStreamEvent(c) for c in chunks)
+        return _FakeCompletion(self.next_content)
+
+
+class FakeOpenAIClient:
+    def __init__(self, api_key: str = "", base_url: str | None = None, **_: Any) -> None:
+        self.api_key = api_key
+        self.base_url = base_url
+        self.chat = type("_Chat", (), {})()
+        self.chat.completions = FakeOpenAICompletions()
+
+
+class FakeOpenAIModule:
+    """Mimics the ``openai`` top-level module (we only use ``openai.OpenAI``)."""
+
+    def __init__(self) -> None:
+        self.last_client: FakeOpenAIClient | None = None
+
+    def OpenAI(self, **kw: Any) -> FakeOpenAIClient:  # noqa: N802 (upstream PascalCase)
+        c = FakeOpenAIClient(**kw)
+        self.last_client = c
+        return c

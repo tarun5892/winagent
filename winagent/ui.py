@@ -26,11 +26,19 @@ import tkinter as tk
 import webbrowser
 from tkinter import messagebox, scrolledtext, ttk
 
+from . import user_config
+from .llm_base import (
+    DEFAULT_MODELS,
+    PROVIDER_KEY_URLS,
+    PROVIDER_LABELS,
+    PROVIDERS,
+)
 from .logger import LOG_QUEUE, setup_logging
 from .orchestrator import Orchestrator
 
 POLL_MS = 100
-APIKEY_HELP_URL = "https://aistudio.google.com/app/apikey"
+# Default help URL when we don't know the active provider yet.
+APIKEY_HELP_URL = PROVIDER_KEY_URLS["gemini"]
 
 # Catppuccin-inspired dark palette
 THEME = {
@@ -137,58 +145,128 @@ def _apply_theme(root: tk.Misc) -> ttk.Style:
 
 
 # ---------------------------------------------------------------------------
-# First-run API key dialog (themed)
+# First-run provider/key dialog (themed, multi-provider)
 # ---------------------------------------------------------------------------
-def prompt_for_api_key(parent: tk.Misc | None = None) -> str | None:
-    """First-run modal that asks the user for a Gemini API key.
+ProviderSetup = tuple[str, str, str | None]  # (provider, api_key, model_or_None)
 
-    Returns the entered key (stripped) or ``None`` if the user cancelled.
+
+def prompt_for_provider_setup(
+    parent: tk.Misc | None = None,
+    initial_provider: str | None = None,
+) -> ProviderSetup | None:
+    """First-run modal: pick provider, paste API key, optionally override model.
+
+    Returns ``(provider, api_key, model_or_None)`` on success, or ``None`` if
+    the user cancelled / dismissed the dialog.
     """
     owns_root = parent is None
     root = tk.Tk() if owns_root else tk.Toplevel(parent)
     _apply_theme(root)
     root.title("WinAgent — first-run setup")
-    root.geometry("560x300")
+    root.geometry("600x440")
     root.resizable(False, False)
 
     body = ttk.Frame(root, padding=24)
     body.pack(fill=tk.BOTH, expand=True)
 
-    ttk.Label(body, text="Welcome to WinAgent", style="Header.TLabel").pack(pady=(0, 4))
+    ttk.Label(body, text="Welcome to WinAgent", style="Header.TLabel").pack(pady=(0, 2))
     ttk.Label(
         body,
         text=(
-            "Paste your free Gemini API key below.\n"
-            "You only need to do this once — it's saved securely on this PC."
+            "Pick a provider and paste your API key.\n"
+            "You only need to do this once — settings are saved on this PC."
         ),
         style="Subtle.TLabel",
         justify="center",
-    ).pack(pady=(0, 12))
+    ).pack(pady=(0, 14))
 
+    # --- provider row ----------------------------------------------------
+    row1 = ttk.Frame(body)
+    row1.pack(fill=tk.X, pady=(0, 6))
+    ttk.Label(row1, text="Provider", style="Subtle.TLabel", width=10).pack(
+        side=tk.LEFT
+    )
+    initial = (initial_provider or "gemini") if initial_provider in PROVIDERS else "gemini"
+    provider_var = tk.StringVar(value=PROVIDER_LABELS[initial])
+    label_to_id = {PROVIDER_LABELS[p]: p for p in PROVIDERS}
+    provider_cb = ttk.Combobox(
+        row1,
+        textvariable=provider_var,
+        values=[PROVIDER_LABELS[p] for p in PROVIDERS],
+        state="readonly",
+        font=("Segoe UI", 10),
+    )
+    provider_cb.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+    # --- API key row -----------------------------------------------------
+    row2 = ttk.Frame(body)
+    row2.pack(fill=tk.X, pady=(8, 6))
+    ttk.Label(row2, text="API key", style="Subtle.TLabel", width=10).pack(
+        side=tk.LEFT
+    )
+    key_var = tk.StringVar()
+    key_entry = ttk.Entry(
+        row2, textvariable=key_var, show="•", font=("Consolas", 11)
+    )
+    key_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+    key_entry.focus_set()
+
+    # --- model row -------------------------------------------------------
+    row3 = ttk.Frame(body)
+    row3.pack(fill=tk.X, pady=(8, 6))
+    ttk.Label(row3, text="Model", style="Subtle.TLabel", width=10).pack(
+        side=tk.LEFT
+    )
+    model_var = tk.StringVar(value=DEFAULT_MODELS[initial])
+    model_entry = ttk.Entry(row3, textvariable=model_var, font=("Consolas", 11))
+    model_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+    hint_var = tk.StringVar(value=f"Default: {DEFAULT_MODELS[initial]}")
+    ttk.Label(body, textvariable=hint_var, style="Subtle.TLabel").pack(
+        anchor="w", pady=(2, 8)
+    )
+
+    # --- key link --------------------------------------------------------
+    link_var = tk.StringVar(value=f"Get a free key  →  {PROVIDER_KEY_URLS[initial]}")
     link = tk.Label(
         body,
-        text="Get a free key at aistudio.google.com  →",
+        textvariable=link_var,
         bg=THEME["bg"],
         fg=THEME["accent"],
         cursor="hand2",
         font=("Segoe UI", 10, "underline"),
     )
-    link.pack(pady=(0, 12))
-    link.bind("<Button-1>", lambda _e: webbrowser.open(APIKEY_HELP_URL))
+    link.pack(pady=(2, 16))
 
-    var = tk.StringVar()
-    entry = ttk.Entry(body, textvariable=var, show="•", width=50, font=("Consolas", 11))
-    entry.pack(fill=tk.X, pady=(0, 16))
-    entry.focus_set()
+    state = {"provider": initial}
 
-    result: dict[str, str | None] = {"key": None}
+    def on_provider_change(_e: object | None = None) -> None:
+        label = provider_var.get()
+        pid = label_to_id.get(label, "gemini")
+        state["provider"] = pid
+        # Only auto-fill the model if the user hasn't typed a custom one.
+        current_model = model_var.get().strip()
+        if current_model in DEFAULT_MODELS.values() or not current_model:
+            model_var.set(DEFAULT_MODELS[pid])
+        hint_var.set(f"Default: {DEFAULT_MODELS[pid]}")
+        link_var.set(f"Get a free key  →  {PROVIDER_KEY_URLS[pid]}")
+
+    provider_cb.bind("<<ComboboxSelected>>", on_provider_change)
+
+    def open_link(_e: object | None = None) -> None:
+        webbrowser.open(PROVIDER_KEY_URLS[state["provider"]])
+
+    link.bind("<Button-1>", open_link)
+
+    result: dict[str, ProviderSetup | None] = {"value": None}
 
     def submit(_e: object | None = None) -> None:
-        v = var.get().strip()
-        if not v:
+        k = key_var.get().strip()
+        if not k:
             messagebox.showwarning("WinAgent", "API key cannot be empty.", parent=root)
             return
-        result["key"] = v
+        m = model_var.get().strip() or None
+        result["value"] = (state["provider"], k, m)
         root.destroy()
 
     def cancel() -> None:
@@ -200,14 +278,24 @@ def prompt_for_api_key(parent: tk.Misc | None = None) -> str | None:
         side=tk.LEFT, padx=6
     )
     ttk.Button(btns, text="Skip", command=cancel).pack(side=tk.LEFT, padx=6)
-    entry.bind("<Return>", submit)
+    key_entry.bind("<Return>", submit)
+    model_entry.bind("<Return>", submit)
 
     root.protocol("WM_DELETE_WINDOW", cancel)
     if owns_root:
         root.mainloop()
     else:
         root.wait_window()
-    return result["key"]
+    return result["value"]
+
+
+# Backwards-compatible Gemini-only shim used by older call sites.
+def prompt_for_api_key(parent: tk.Misc | None = None) -> str | None:
+    """Legacy single-provider (Gemini) wrapper kept for compatibility."""
+    choice = prompt_for_provider_setup(parent=parent, initial_provider="gemini")
+    if choice is None:
+        return None
+    return choice[1]
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +344,21 @@ class WinAgentUI:
         right = ttk.Frame(header)
         right.pack(side=tk.RIGHT)
 
+        # Provider pill: shows the active provider and is clickable to open
+        # the Settings dialog (where the user can switch).
+        self.provider_pill = tk.Label(
+            right,
+            text=self._provider_pill_text(),
+            bg=THEME["surface_alt"],
+            fg=THEME["text"],
+            padx=10,
+            pady=4,
+            font=("Segoe UI", 10),
+            cursor="hand2",
+        )
+        self.provider_pill.pack(side=tk.LEFT, padx=(0, 8))
+        self.provider_pill.bind("<Button-1>", lambda _e: self._open_settings())
+
         self.status_pill = tk.Label(
             right,
             text="●  Ready",
@@ -268,6 +371,18 @@ class WinAgentUI:
         self.status_pill.pack(side=tk.LEFT, padx=(0, 8))
 
         ttk.Button(right, text="⚙  Settings", command=self._open_settings).pack(side=tk.LEFT)
+
+    @staticmethod
+    def _provider_pill_text() -> str:
+        provider = user_config.get_provider()
+        label = PROVIDER_LABELS.get(provider, provider)
+        # Drop everything in parentheses to keep the pill compact.
+        short = label.split(" (")[0]
+        return f"🧠  {short}"
+
+    def _refresh_provider_pill(self) -> None:
+        if hasattr(self, "provider_pill"):
+            self.provider_pill.configure(text=self._provider_pill_text())
 
     def _build_body(self) -> None:
         body = ttk.Frame(self.root, padding=(20, 0, 20, 8))
@@ -384,36 +499,66 @@ class WinAgentUI:
         win = tk.Toplevel(self.root)
         _apply_theme(win)
         win.title("WinAgent — Settings")
-        win.geometry("420x260")
+        win.geometry("460x340")
         win.transient(self.root)
         body = ttk.Frame(win, padding=20)
         body.pack(fill=tk.BOTH, expand=True)
-        ttk.Label(body, text="Settings", style="Header.TLabel").pack(anchor="w", pady=(0, 12))
+        ttk.Label(body, text="Settings", style="Header.TLabel").pack(anchor="w", pady=(0, 8))
 
-        def change_key() -> None:
-            from . import user_config
+        current_provider = user_config.get_provider()
+        ttk.Label(
+            body,
+            text=f"Active provider: {PROVIDER_LABELS.get(current_provider, current_provider)}",
+            style="Subtle.TLabel",
+        ).pack(anchor="w", pady=(0, 12))
 
-            new = prompt_for_api_key(parent=win)
-            if new:
-                user_config.set_api_key(new)
-                self._append_log("[ui] API key updated", "OK")
+        def change_provider() -> None:
+            choice = prompt_for_provider_setup(
+                parent=win, initial_provider=user_config.get_provider()
+            )
+            if choice is None:
+                return
+            new_provider, new_key, new_model = choice
+            user_config.set_provider(new_provider)
+            user_config.set_provider_api_key(new_provider, new_key)
+            if new_model:
+                user_config.set_provider_model(new_provider, new_model)
+            # Reset the orchestrator's cached client so the next plan() call
+            # picks up the new provider.
+            self.orch._client = None
+            self._refresh_provider_pill()
+            self._append_log(
+                f"[ui] provider switched to {PROVIDER_LABELS.get(new_provider, new_provider)}",
+                "OK",
+            )
+            win.destroy()
 
-        ttk.Button(body, text="Change Gemini API key…", command=change_key).pack(
-            fill=tk.X, pady=4
-        )
+        ttk.Button(
+            body,
+            text="Change provider → API key → model…",
+            command=change_provider,
+            style="Accent.TButton",
+        ).pack(fill=tk.X, pady=4)
+
+        def open_keys_page() -> None:
+            webbrowser.open(PROVIDER_KEY_URLS.get(user_config.get_provider(), APIKEY_HELP_URL))
+
+        ttk.Button(
+            body,
+            text="Open API key page for active provider",
+            command=open_keys_page,
+        ).pack(fill=tk.X, pady=4)
         ttk.Button(body, text="Reset memory", command=self._reset_memory).pack(
             fill=tk.X, pady=4
         )
-        ttk.Button(
-            body,
-            text="Open API key page",
-            command=lambda: webbrowser.open(APIKEY_HELP_URL),
-        ).pack(fill=tk.X, pady=4)
         ttk.Label(
             body,
-            text="\nProject root and model are configured via environment variables.",
+            text=(
+                "\nProject root is configured via the WINAGENT_PROJECT_ROOT "
+                "environment variable."
+            ),
             style="Subtle.TLabel",
-            wraplength=380,
+            wraplength=410,
         ).pack(anchor="w", pady=(12, 0))
 
     # -- log streaming ------------------------------------------------------

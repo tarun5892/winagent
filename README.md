@@ -1,17 +1,20 @@
 # WinAgent
 
 A lightweight, multimodal **coding agent + Windows desktop automation agent**
-backed by **Gemini 2.5 Pro**. Type a command and WinAgent reads/edits your
-codebase, runs shell commands, searches with grep, and (optionally)
-screenshots and drives the Windows desktop or Excel.
+powered by your choice of **Gemini, OpenRouter, Groq, or Mistral**. Type a
+command and WinAgent reads/edits your codebase, runs shell commands, searches
+with grep, and (optionally) screenshots and drives the Windows desktop or Excel.
 
 ## Highlights
 
+- **Multi-provider LLM**: Gemini, OpenRouter (300+ models incl. free routes
+  like DeepSeek-V3), Groq (fast Llama 3.3), Mistral. Switch providers from
+  the in-app Settings dialog.
 - **Coding-agent toolset**: `file_read` / `file_write` / `file_edit` /
   `apply_patch` / `file_delete` / `list_dir` / `shell` / `grep` / `find_files`.
 - **Desktop automation**: `click` / `type` / `hotkey` / `scroll` / `wait` /
   `powershell` / `excel` / `screenshot`.
-- **Streaming Gemini responses** for snappy feedback.
+- **Streaming responses** for snappy feedback (every supported provider).
 - **Strict JSON schema** (Pydantic) — no free-form code execution.
 - **Short-term rolling memory** (deque) injected into every prompt for
   multi-step continuity.
@@ -24,7 +27,7 @@ screenshots and drives the Windows desktop or Excel.
 ```
 tkinter UI ──submit──▶ Orchestrator (worker thread)
                         │
-                        ├─▶ Vision (MSS, optional) ──▶ Gemini 2.5 Pro (streaming) ──▶ JSON
+                        ├─▶ Vision (MSS, optional) ──▶ LLM (Gemini / OpenRouter / Groq / Mistral) ──▶ JSON
                         │                                                            │
                         │                                              Pydantic validation
                         │                                                            │
@@ -46,9 +49,13 @@ Pre-built **`winagent.exe`** is produced by GitHub Actions on every push to
 2. Click the latest successful run.
 3. Under **Artifacts**, download `winagent-windows-x64`.
 4. Unzip → double-click `winagent.exe`.
-5. On first launch a popup asks for your free Gemini API key
-   (get one at <https://aistudio.google.com/app/apikey>); it's saved to
-   `%APPDATA%\WinAgent\config.json` so you only enter it once.
+5. On first launch a popup asks you to pick a provider and paste an API
+   key. The settings are saved to `%APPDATA%\WinAgent\config.json` so you
+   only enter them once. Where to get a free key for each provider:
+   - **Gemini** — <https://aistudio.google.com/app/apikey>
+   - **OpenRouter** — <https://openrouter.ai/keys> (free models available)
+   - **Groq** — <https://console.groq.com/keys> (generous free tier)
+   - **Mistral** — <https://console.mistral.ai/api-keys/>
 
 Tagged releases (`git tag v0.2.0 && git push --tags`) also attach
 `winagent.exe` to a [GitHub Release](https://github.com/tarun5892/winagent/releases).
@@ -71,10 +78,21 @@ pip install -e ".[dev]"
 # Option 1 (recommended): just launch and use the first-run popup
 python -m winagent
 
-# Option 2: pre-set the key as an env var
-$env:GEMINI_API_KEY="your_key"
+# Option 2: pre-set the key as an env var (per provider)
+$env:GEMINI_API_KEY="your_key"        # or OPENROUTER_API_KEY / GROQ_API_KEY / MISTRAL_API_KEY
+$env:WINAGENT_PROVIDER="openrouter"   # gemini | openrouter | groq | mistral
+$env:WINAGENT_MODEL="anthropic/claude-3.5-sonnet"  # optional override
 python -m winagent
 ```
+
+### Provider defaults
+
+| Provider | Default model | Free tier |
+|---|---|---|
+| Gemini | `gemini-2.5-flash` | ~1500 req/day |
+| OpenRouter | `deepseek/deepseek-chat-v3-0324:free` | yes (free models) |
+| Groq | `llama-3.3-70b-versatile` | yes (generous) |
+| Mistral | `mistral-large-latest` | small free tier |
 
 To build the Windows .exe locally:
 
@@ -128,7 +146,8 @@ pytest -q
 
 The test suite uses fakes for `pyautogui`, `win32com`, `google.generativeai`,
 so it runs cross-platform without touching your desktop or making API calls.
-Live integration on Windows requires a real `GEMINI_API_KEY` and a real desktop.
+Live integration on Windows requires a real provider API key (Gemini, OpenRouter,
+Groq, or Mistral) and — for desktop actions — a real Windows desktop.
 
 ## Safety
 

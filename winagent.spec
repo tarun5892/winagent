@@ -11,7 +11,7 @@ binaries: list[tuple[str, str]] = []
 
 # google.generativeai pulls a lot of submodules dynamically; collect_all
 # ensures none are missed.
-for pkg in ("google.generativeai", "google.ai.generativelanguage", "pydantic"):
+for pkg in ("google.generativeai", "google.ai.generativelanguage", "pydantic", "openai"):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b
