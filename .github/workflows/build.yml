@@ -1,0 +1,74 @@
+name: build-windows-exe
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write  # required by softprops/action-gh-release on tag pushes
+
+jobs:
+  build:
+    name: Build winagent.exe (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install pyinstaller==6.10.0
+
+      - name: Lint & type-check
+        run: |
+          ruff check winagent tests
+          mypy winagent
+
+      - name: Run tests
+        run: pytest -q --timeout=20
+
+      - name: Build winagent.exe
+        run: pyinstaller --noconfirm --clean winagent.spec
+
+      - name: Smoke-test the built executable
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/winagent.exe")) {
+            Write-Error "winagent.exe not produced by PyInstaller"
+            exit 1
+          }
+          $size = (Get-Item "dist/winagent.exe").Length
+          Write-Host "winagent.exe size: $([math]::Round($size/1MB,1)) MB"
+
+      - name: Verify bundle imports cleanly
+        # Catches PyInstaller-bundling bugs (relative imports, missing hidden
+        # imports, etc.) by running --check-only inside the bundled Python.
+        run: python scripts/smoke_test_exe.py dist/winagent.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: winagent-windows-x64
+          path: dist/winagent.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attach to Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/winagent.exe
+          generate_release_notes: true

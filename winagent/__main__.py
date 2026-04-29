@@ -1,9 +1,7 @@
-from .ui import WinAgentUI
+"""Allow ``python -m winagent`` to launch the app."""
+import sys
 
-
-def main() -> None:
-    WinAgentUI().run()
-
+from winagent.app import main
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

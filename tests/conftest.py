@@ -87,3 +87,13 @@ def fake_genai(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setitem(sys.modules, "google", pkg)
     monkeypatch.setitem(sys.modules, "google.generativeai", fake)
     return fake
+
+
+@pytest.fixture
+def fake_openai(monkeypatch: pytest.MonkeyPatch):
+    """Inject a fake ``openai`` module."""
+    from tests.fakes import FakeOpenAIModule
+
+    fake = FakeOpenAIModule()
+    monkeypatch.setitem(sys.modules, "openai", fake)
+    return fake
